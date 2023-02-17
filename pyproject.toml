@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "ml-tools"
+version = "0.1.0"
+description = "A collection of tools for monitoring, checkpointing and configuring of machine learning experiments."
+authors = ["Vincent Dutordoir <dutordoirv@gmail.com>"]
+license = "Apache-2.0"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+equinox = "^0.9.2"
+clu = "^0.0.8"
+jax = "^0.4.4"
+jaxlib = "^0.4.4"
+tensorboardX = "^2.6"
+pandas = "^1.5.3"
+
+[tool.poetry.dev-dependencies]
+ruff = "^0.0.247"
+pytest = "^7.2.1"
+black = "^23.1.0"
+isort = "^5.12.0"
+taskipy = "^1.10.3"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
