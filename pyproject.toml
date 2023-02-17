@@ -31,9 +31,9 @@ lint = """
     echo ============Ruff=============
     ruff check ml_tools
     echo ============Isort=============
-	isort ml_tools --check-only --df
+    isort ml_tools --check-only --df
     echo ============Black=============
-	black ml_tools --check --diff
+    black ml_tools --check --diff
 """
 
 [tool.black]
