@@ -1,11 +1,9 @@
 """Parsing dataclasses to config_dicts and vica versa."""
 
-from typing import Any, Mapping, TypeVar, Type
-
 import dataclasses
+from typing import Any, Mapping, Type, TypeVar
 
 from ml_collections import config_dict
-
 
 DataClass = TypeVar("DataClass")
 
@@ -32,7 +30,7 @@ def _dataclass_from_dict(klass, d):
     try:
         fieldtypes = {f.name: f.type for f in dataclasses.fields(klass)}
         return klass(**{f: _dataclass_from_dict(fieldtypes[f], d[f]) for f in d})
-    except:
+    except Exception:
         return d  # Not a dataclass field
 
 

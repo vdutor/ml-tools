@@ -26,22 +26,19 @@ logging or writing to multiple formats.
 
 import abc
 import atexit
-from typing import Sequence, Any, Mapping, Optional, Union
-
-from jaxtyping import Array
-import jax.numpy as jnp
-import numpy as np
 import os
-import pandas as pd
+from typing import Mapping, Sequence, Union
 
+import numpy as np
+import pandas as pd
+from jaxtyping import Array
 from tensorboardX import SummaryWriter
 from tensorboardX.utils import figure_to_image, make_grid
 
 try:
     import matplotlib.pyplot as plt
-    import matplotlib.backends.backend_agg as plt_backend_agg
 except ModuleNotFoundError:
-    print('please install matplotlib')
+    print("please install matplotlib")
 
 
 Scalar = Union[int, float, Array]
@@ -160,7 +157,6 @@ class TensorBoardWriter(_MetricWriter):
             Users are responsible to scale the data in the correct range/type.
         """
         for key, value in images.items():
-
             if len(value.shape) == 3:
                 self._summary_writer.add_image(key, value, global_step=step)
             if len(value.shape) == 4:

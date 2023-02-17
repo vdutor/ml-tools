@@ -13,6 +13,7 @@ jax = "^0.4.4"
 jaxlib = "^0.4.4"
 tensorboardX = "^2.6"
 pandas = "^1.5.3"
+matplotlib = "^3.7.0"
 
 [tool.poetry.dev-dependencies]
 ruff = "^0.0.247"
@@ -20,6 +21,33 @@ pytest = "^7.2.1"
 black = "^23.1.0"
 isort = "^5.12.0"
 taskipy = "^1.10.3"
+
+[tool.taskipy.tasks]
+format = """
+    isort ml_tools
+    black ml_tools
+"""
+lint = """
+    echo ============Ruff=============
+    ruff check ml_tools
+    echo ============Isort=============
+	isort ml_tools --check-only --df
+    echo ============Black=============
+	black ml_tools --check --diff
+"""
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.per-file-ignores]
+'ml_tools/__init__.py' = ['F401']
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
