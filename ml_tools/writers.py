@@ -29,20 +29,19 @@ from __future__ import annotations
 
 import abc
 import atexit
-import yaml
-from typing import Sequence, Any, Mapping, Optional, Union
-
-from pathlib import Path
-from jaxtyping import Array
-import jax.numpy as jnp
-import numpy as np
-import os
-import pandas as pd
 import io
-from PIL import Image
+import os
+from pathlib import Path
+from typing import Any, Mapping, Optional, Sequence, Union
 
-import matplotlib.pyplot as plt
+import jax.numpy as jnp
 import matplotlib.backends.backend_agg as plt_backend_agg
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import yaml
+from jaxtyping import Array
+from PIL import Image
 
 try:
     from tensorboardX import SummaryWriter
@@ -198,7 +197,6 @@ class TensorBoardWriter(_MetricWriter):
             Users are responsible to scale the data in the correct range/type.
         """
         for key, value in images.items():
-
             if len(value.shape) == 3:
                 self._summary_writer.add_image(key, value, global_step=step)
             if len(value.shape) == 4:
@@ -235,7 +233,6 @@ class AimWriter(_MetricWriter):
 
         super().__init__()
         self._run = aim.Run(experiment=experiment)
-    
 
     def log_hparams(self, hparams: Mapping[str, Any]):
         self._run["hparams"] = _to_flattened_dict(hparams)
@@ -268,8 +265,8 @@ class AimWriter(_MetricWriter):
         """
         for key, fig in figures.items():
             img_buf = io.BytesIO()
-            fig.savefig(img_buf, format='png')
-            im = Image.open(img_buf)            
+            fig.savefig(img_buf, format="png")
+            im = Image.open(img_buf)
             im = aim.Image(im)
             plt.close(fig)
             self._run.track(value=im, name=key, step=step)
@@ -305,7 +302,7 @@ class LocalWriter(_MetricWriter):
 
     def log_hparams(self, hparams: Mapping[str, Any]):
         yaml_string = yaml.dump(hparams)
-        with open(self._config_path, 'w') as f:
+        with open(self._config_path, "w") as f:
             f.write(yaml_string)
 
     def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
