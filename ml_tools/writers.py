@@ -1,9 +1,3 @@
-# Copyright 2023 Vincent Dutordoir.
-#
-# Modifications:
-#   - TensorBoardX support
-#   - Local file writer
-
 # Copyright 2022 The CLU Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,31 +11,64 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Copyright 2023 Vincent Dutordoir.
+#
+# Modifications:
+#   - TensorBoardX support
+#   - Local file writer
+#   - Aim writer
+
 """Library for unify reporting model metrics across various logging formats.
 
 This library provides a MetricWriter for each logging format (SummyWriter,
 LoggingWriter, etc.) and composing MetricWriter to add support for asynchronous
 logging or writing to multiple formats.
 """
+from __future__ import annotations
 
 import abc
 import atexit
-import os
-from typing import Mapping, Sequence, Union
+import yaml
+from typing import Sequence, Any, Mapping, Optional, Union
 
-import numpy as np
-import pandas as pd
+from pathlib import Path
 from jaxtyping import Array
-from tensorboardX import SummaryWriter
-from tensorboardX.utils import figure_to_image, make_grid
+import jax.numpy as jnp
+import numpy as np
+import os
+import pandas as pd
+import io
+from PIL import Image
+
+import matplotlib.pyplot as plt
+import matplotlib.backends.backend_agg as plt_backend_agg
 
 try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    print("please install matplotlib")
+    from tensorboardX import SummaryWriter
+    from tensorboardX.utils import figure_to_image, make_grid
+except ImportError:
+    tensorboardx = None
+
+try:
+    import aim
+except ImportError:
+    aim = None
 
 
 Scalar = Union[int, float, Array]
+
+
+def _to_flattened_dict(d: Mapping, prefix: str = "") -> Mapping:
+    """Flattens a nested dictionary into a single level dictionary."""
+    res = dict()
+    for k, v in d.items():
+        prefixed_name = f"{prefix}.{k}" if len(prefix) > 0 else k
+        if isinstance(v, dict):
+            res = {**res, **_to_flattened_dict(v, prefix=prefixed_name)}
+        else:
+            res[prefixed_name] = v
+    return res
 
 
 class _MetricWriter(abc.ABC):
@@ -49,6 +76,10 @@ class _MetricWriter(abc.ABC):
 
     def __init__(self):
         atexit.register(self.close)
+
+    @abc.abstractmethod
+    def log_hparams(self, hparams: Mapping[str, Any]):
+        ...
 
     @abc.abstractmethod
     def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
@@ -109,6 +140,10 @@ class MultiWriter(_MetricWriter):
     def __init__(self, writers: Sequence[_MetricWriter]):
         self._writers = tuple(writers)
 
+    def log_hparams(self, hparams: Mapping[str, Any]):
+        for w in self._writers:
+            w.log_hparams(hparams)
+
     def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
         for w in self._writers:
             w.write_scalars(step, scalars)
@@ -138,10 +173,16 @@ class TensorBoardWriter(_MetricWriter):
         export_scalars: If `True` exports the scalars to json to `logdir/scalars.json`
             when writer is closed.
         """
+        if tensorboardx is None:
+            raise ImportError("TensorBoardWriter requires the `tensorboardx` package")
+
         super().__init__()
         self._export_scalars = export_scalars
         self._logdir = logdir
         self._summary_writer = SummaryWriter(logdir)
+
+    def log_hparams(self, hparams: Mapping[str, Any]):
+        pass
 
     def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
         for key, value in scalars.items():
@@ -157,6 +198,7 @@ class TensorBoardWriter(_MetricWriter):
             Users are responsible to scale the data in the correct range/type.
         """
         for key, value in images.items():
+
             if len(value.shape) == 3:
                 self._summary_writer.add_image(key, value, global_step=step)
             if len(value.shape) == 4:
@@ -181,6 +223,64 @@ class TensorBoardWriter(_MetricWriter):
         self._summary_writer.close()
 
 
+class AimWriter(_MetricWriter):
+    """MetricWriter that writes to Aim."""
+
+    def __init__(self, experiment: str):
+        """
+        :param experiment: name of the experiment
+        """
+        if aim is None:
+            raise ImportError("AimWriter requires the `aim` package")
+
+        super().__init__()
+        self._run = aim.Run(experiment=experiment)
+    
+
+    def log_hparams(self, hparams: Mapping[str, Any]):
+        self._run["hparams"] = _to_flattened_dict(hparams)
+
+    def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
+        for key, value in scalars.items():
+            self._run.track(value=value, name=key, step=step)
+
+    def write_images(self, step: int, images: Mapping[str, Array]):
+        """format: (N)CHW
+
+        img_tensor: An `uint8` or `float` Tensor of shape `
+            [channel, height, width]` where `channel` is 1, 3, or 4.
+            The elements in img_tensor can either have values
+            in [0, 1] (float32) or [0, 255] (uint8).
+            Users are responsible to scale the data in the correct range/type.
+        """
+        for key, value in images.items():
+            assert len(value.shape) == 3, "AimWriter only supports HWC images"
+            value = aim.Image(value)
+            self._run.track(value=value, name=key, step=step)
+
+    def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
+        """Writes matplotlib figures.
+
+        Note that this requires the ``matplotlib`` package.
+
+        Args:
+            figure (matplotlib.pyplot.figure)
+        """
+        for key, fig in figures.items():
+            img_buf = io.BytesIO()
+            fig.savefig(img_buf, format='png')
+            im = Image.open(img_buf)            
+            im = aim.Image(im)
+            plt.close(fig)
+            self._run.track(value=im, name=key, step=step)
+
+    def flush(self):
+        pass
+
+    def close(self):
+        self._run.close()
+
+
 def _cond_mkdir(path):
     if os.path.exists(path):
         return
@@ -193,18 +293,20 @@ _IMAGE_PATH_TEMPLATE = "%s/images"
 class LocalWriter(_MetricWriter):
     """MetricWriter that writes files to local disk."""
 
-    def __init__(self, logdir: str, flush_every_n: int = 100):
-        """
-        export_scalars: If `True` exports the scalars to json to `logdir/scalars.json`
-            when writer is closed.
-        """
+    def __init__(self, logdir: str, flush_every_n: int = 100, filename: str = "metrics"):
         super().__init__()
         _cond_mkdir(logdir)
         self._count = 0
         self._flush_every_n = flush_every_n
         self._logdir = logdir
-        self._metrics_path = f"{self._logdir}/metrics.csv"
+        self._metrics_path = f"{self._logdir}/{filename}.csv"
+        self._config_path = f"{self._logdir}/config.yaml"
         self._metrics = []
+
+    def log_hparams(self, hparams: Mapping[str, Any]):
+        yaml_string = yaml.dump(hparams)
+        with open(self._config_path, 'w') as f:
+            f.write(yaml_string)
 
     def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
         metrics = {"step": step, **scalars}
@@ -254,14 +356,12 @@ class LocalWriter(_MetricWriter):
         if len(self._metrics) == 0:
             return
 
+        df = pd.DataFrame(self._metrics)
         if os.path.exists(self._metrics_path):
-            # append
-            pd.DataFrame(self._metrics).to_csv(
-                self._metrics_path, mode="a", header=False, index=False
-            )
-        else:
-            # create new one
-            pd.DataFrame(self._metrics).to_csv(self._metrics_path, header=False, index=False)
+            prev = pd.read_csv(self._metrics_path, index_col=0)
+            df = pd.concat([prev, df], axis=0)
+
+        df.to_csv(self._metrics_path)
 
         self._count = 0
         self._metrics = []

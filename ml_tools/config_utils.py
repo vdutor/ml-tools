@@ -1,45 +1,16 @@
-"""Parsing dataclasses to config_dicts and vica versa."""
+import sys
+from absl import flags
+from typing import Type, TypeVar
+from IPython import get_ipython
+from ml_collections import config_flags
 
-import dataclasses
-from typing import Any, Mapping, Type, TypeVar
-
-from ml_collections import config_dict
-
-DataClass = TypeVar("DataClass")
-
-stdlib_hash = hash
+A = TypeVar("A")
 
 
-def to_configdict(dc: Any) -> config_dict.ConfigDict:
-    return config_dict.ConfigDict(initial_dictionary=dataclasses.asdict(dc))
-
-
-def to_dataclass(klass: Type[DataClass], data: config_dict.ConfigDict) -> DataClass:
-    return _dataclass_from_dict(klass, data)
-
-
-def get_id(config: DataClass) -> int:
-    return abs(stdlib_hash(to_configdict(config).to_json()))
-
-
-def to_yaml(config: DataClass) -> str:
-    return to_configdict(config).__str__()
-
-
-def _dataclass_from_dict(klass, d):
-    try:
-        fieldtypes = {f.name: f.type for f in dataclasses.fields(klass)}
-        return klass(**{f: _dataclass_from_dict(fieldtypes[f], d[f]) for f in d})
-    except Exception:
-        return d  # Not a dataclass field
-
-
-def _to_flattened_dict(d: Mapping, prefix: str = "") -> Mapping:
-    res = dict()
-    for k, v in d.items():
-        prefixed_name = f"{prefix}.{k}" if len(prefix) > 0 else k
-        if isinstance(v, dict):
-            res = {**res, **_to_flattened_dict(v, prefix=prefixed_name)}
-        else:
-            res[prefixed_name] = v
-    return res
+def setup_config(config_class: Type[A]) -> A:
+    config = config_class()
+    if not get_ipython():
+        config_flag = config_flags.DEFINE_config_dataclass("config", config)
+        flags.FLAGS(sys.argv)
+        config = config_flag.value
+    return config
