@@ -9,6 +9,27 @@ Inspired by and/or heavily based on:
 
 Written for JAX with minimal other dependencies.
 
+## Installation
+
+```bash
+pip install git+https://github.com/tangentlabs/django-oscar-paypal.git
+```
+
+### Optional
+To use the Tensorboard writer, you need to install `tensorboardX`:
+```bash
+pip install tensorboardX
+```
+
+To use the Aim writer, you need to install `aim`:
+```bash
+pip install aim
+```
+And follow the instructions to [install the Aim server](https://aimstack.io/#quick-start):
+```bash
+aim up
+```
+
 
 ## Highlight of features
 
