@@ -12,7 +12,7 @@ Written for JAX with minimal other dependencies.
 ## Installation
 
 ```bash
-pip install git+https://github.com/tangentlabs/django-oscar-paypal.git
+pip install git+https://github.com/vdutor/ml-tools
 ```
 
 ### Optional
@@ -116,7 +116,7 @@ Actions are defined by a callback function `callback_fn` which is called at cert
 - `t`: the current time
 - `**kwargs`: additional arguments passed to the action. The callback can access these arguments by name, as illustrated in the example below:
 
-```
+```python
 from ml_tools import actions
 
 def callback_action1(step, t, **kwargs):
