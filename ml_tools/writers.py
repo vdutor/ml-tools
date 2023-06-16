@@ -31,6 +31,7 @@ import abc
 import atexit
 import io
 import os
+import importlib
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence, Union
 
@@ -47,12 +48,12 @@ try:
     from tensorboardX import SummaryWriter
     from tensorboardX.utils import figure_to_image, make_grid
 except ImportError:
-    tensorboardx = None
+    pass
 
 try:
     import aim
 except ImportError:
-    aim = None
+    pass
 
 
 Scalar = Union[int, float, Array]
@@ -172,7 +173,7 @@ class TensorBoardWriter(_MetricWriter):
         export_scalars: If `True` exports the scalars to json to `logdir/scalars.json`
             when writer is closed.
         """
-        if tensorboardx is None:
+        if importlib.find_loader('tensorboardX') is None:
             raise ImportError("TensorBoardWriter requires the `tensorboardx` package")
 
         super().__init__()
@@ -228,7 +229,8 @@ class AimWriter(_MetricWriter):
         """
         :param experiment: name of the experiment
         """
-        if aim is None:
+
+        if importlib.find_loader('aim') is None:
             raise ImportError("AimWriter requires the `aim` package")
 
         super().__init__()
