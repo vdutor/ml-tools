@@ -254,23 +254,6 @@ class WandbWriter(_MetricWriter):
   def close(self):
     wandb.finish()
 
-def _resolve_write_fn(data):
-  def _write_numpy_file(filepath, obj):
-    obj = np.array(obj)
-    np.save(filepath, arr=obj)
-  def _write_json_file(filepath, obj):
-    with open(filepath, "w") as f:
-      f.write(json.dumps(obj))
-  if isinstance(data, dict):
-    write_file_fn = _write_json_file
-    file_ending = ".json"
-  elif hasattr(data, "shape"):
-    write_file_fn = _write_numpy_file
-    file_ending = ".npy"
-  else:
-    raise ValueError(f"Unhandled data type: {type(data)}")
-  return write_file_fn, file_ending
-
 class TensorBoardWriter(_MetricWriter):
     """MetricWriter that writes TF summary files."""
 
@@ -451,8 +434,13 @@ class LocalWriter(_MetricWriter):
             plt.close(fig)
 
     def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
-      # TODO
-      pass
+      has_step = step is not None
+      for name, data_entry in data.items():
+        write_file_fn, file_ending = _resolve_write_fn(data=data_entry)
+        if has_step:
+          name = f"{name}_{step}"
+        filepath = f"{self._logdir}/{name}{file_ending}"
+        write_file_fn(filepath=filepath, obj=data_entry)
 
     def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
         """Writes matplotlib figures.
@@ -485,3 +473,20 @@ class LocalWriter(_MetricWriter):
 
     def close(self):
         self.flush()
+
+def _resolve_write_fn(data):
+  def _write_numpy_file(filepath, obj):
+    obj = np.array(obj)
+    np.save(filepath, arr=obj)
+  def _write_json_file(filepath, obj):
+    with open(filepath, "w") as f:
+      f.write(json.dumps(obj))
+  if isinstance(data, dict):
+    write_file_fn = _write_json_file
+    file_ending = ".json"
+  elif hasattr(data, "shape"):
+    write_file_fn = _write_numpy_file
+    file_ending = ".npy"
+  else:
+    raise ValueError(f"Unhandled data type: {type(data)}")
+  return write_file_fn, file_ending
