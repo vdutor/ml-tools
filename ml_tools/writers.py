@@ -33,8 +33,9 @@ import io
 import os
 import importlib
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Optional, Sequence, Dict, Union
 
+import tempfile
 import jax.numpy as jnp
 import matplotlib.backends.backend_agg as plt_backend_agg
 import matplotlib.pyplot as plt
@@ -43,10 +44,13 @@ import pandas as pd
 import yaml
 from jaxtyping import Array
 from PIL import Image
+import json
 
 try:
     from tensorboardX import SummaryWriter
     from tensorboardX.utils import figure_to_image, make_grid
+    import wandb
+    from pytorch_lightning.loggers import WandbLogger
 except ImportError:
     pass
 
@@ -122,6 +126,15 @@ class _MetricWriter(abc.ABC):
         """
 
     @abc.abstractmethod
+    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+        """Write data for the step. If step is not provided a default namespace is used.
+
+        Args:
+          step: Step at which the data was gathered.
+          data: Mapping from metric name to object (serializable dict or array).
+        """
+
+    @abc.abstractmethod
     def flush(self):
         """Tells the MetricWriter to write out any cached values."""
 
@@ -164,6 +177,94 @@ class MultiWriter(_MetricWriter):
         for w in self._writers:
             w.close()
 
+class WandbWriter(_MetricWriter):
+  """MetricWriter that writes to Weights & Biases (Wandb)."""
+
+  def __init__(self, project: str, experiment: str, api_key: str=None):
+    """
+    :param project: name of the project
+    :param experiment: name of the experiment
+    :param api_key: Weights & Biases API key
+    """
+    if api_key is not None:
+      wandb.login(key=api_key)
+    logger = WandbLogger(name=experiment, project=project)
+    wandb_run_object = logger.experiment
+    assert wandb_run_object is not None
+    self._wandb_run_object = wandb_run_object
+    self._project = project
+    self._experiment = experiment
+    self._run = wandb_run_object.id
+    self._logger = logger
+
+  def log_hparams(self, hparams: Mapping[str, Any]):
+    self._logger.log_hyperparams(hparams)
+
+  def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
+    self._logger.log_metrics(scalars, step=step)
+
+  def _file_collection_artifact_name(self, step: int=None):
+    project = self._project
+    experiment = self._experiment
+    run_id = self._run
+    has_step = step is not None
+    if has_step:
+      return f"{project}_{experiment}_{run_id}_{step}"
+    return f"{project}_{experiment}_{run_id}"
+
+  def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int=None):
+    for name, data_entry in data.items():
+      self._write_file(name=name, data=data_entry, step=step)
+
+  def _write_file(self, name: str, data: Union[Array, Dict], step: int=None):
+    write_file_fn, file_ending = _resolve_write_fn(data)
+    artifact_name = self._file_collection_artifact_name(step=step)
+    file_collection_artifact = wandb.Artifact(name=artifact_name, type="general")
+    with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
+      local_filepath = fp.name
+      remote_filepath = f"{name}{file_ending}"
+      write_file_fn(file_handle=fp, obj=data)
+      file_collection_artifact.add_file(local_path=local_filepath, name=remote_filepath)
+      wandb.run.log_artifact(file_collection_artifact)
+
+  def download_file_collection(self, step: int=None, target_directory: str="/tmp"):
+    project_name = self._project
+    artifact_name = self._file_collection_artifact_name(step=step)
+    self._logger.download_artifact(
+      # Always v0 since the artifact name holding all data entries should be unique (per step).
+      artifact=f"{project_name}/{artifact_name}:v0",
+      save_dir=target_directory
+    )
+
+  def write_images(self, step: int, images: Mapping[str, Array]):
+    for image_key, image in images.items():
+      key = f"{step}_{image_key}"
+      self._logger.log_image(key=key, images=[image])
+
+  def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
+    raise NotImplementedError
+
+  def flush(self):
+    pass
+
+  def close(self):
+    wandb.finish()
+
+def _resolve_write_fn(data):
+  def _write_numpy_file(file_handle, obj):
+    obj = np.array(obj)
+    np.save(file_handle, arr=obj)
+  def _write_json_file(file_handle, obj):
+    json.dump(file_handle, obj)
+  if isinstance(data, dict):
+    write_file_fn = _write_json_file
+    file_ending = ".json"
+  elif hasattr(data, "shape"):
+    write_file_fn = _write_numpy_file
+    file_ending = ".npy"
+  else:
+    raise ValueError(f"Unhandled data type: {type(data)}")
+  return write_file_fn, file_ending
 
 class TensorBoardWriter(_MetricWriter):
     """MetricWriter that writes TF summary files."""
