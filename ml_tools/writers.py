@@ -227,7 +227,7 @@ class WandbWriter(_MetricWriter):
     with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
       local_filepath = fp.name
       remote_filepath = f"{name}{file_ending}"
-      write_file_fn(file_handle=fp, obj=data)
+      write_file_fn(filepath=local_filepath, obj=data)
       file_collection_artifact.add_file(local_path=local_filepath, name=remote_filepath)
       wandb.run.log_artifact(file_collection_artifact)
 
@@ -255,11 +255,12 @@ class WandbWriter(_MetricWriter):
     wandb.finish()
 
 def _resolve_write_fn(data):
-  def _write_numpy_file(file_handle, obj):
+  def _write_numpy_file(filepath, obj):
     obj = np.array(obj)
-    np.save(file_handle, arr=obj)
-  def _write_json_file(file_handle, obj):
-    json.dump(file_handle, obj)
+    np.save(filepath, arr=obj)
+  def _write_json_file(filepath, obj):
+    with open(filepath, "w") as f:
+      f.write(json.dumps(obj))
   if isinstance(data, dict):
     write_file_fn = _write_json_file
     file_ending = ".json"
