@@ -169,6 +169,10 @@ class MultiWriter(_MetricWriter):
         for w in self._writers:
             w.write_figures(step, figures)
 
+    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+      for w in self._writers:
+        w.write_data(data=data, step=step)
+
     def flush(self):
         for w in self._writers:
             w.flush()
@@ -304,6 +308,10 @@ class TensorBoardWriter(_MetricWriter):
             if len(value.shape) == 4:
                 self._summary_writer.add_images(key, value, global_step=step)
 
+    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+      # TODO
+      pass
+
     def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
         """Writes matplotlib figures.
 
@@ -343,6 +351,10 @@ class AimWriter(_MetricWriter):
     def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
         for key, value in scalars.items():
             self._run.track(value=value, name=key, step=step)
+
+    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+      # TODO
+      pass
 
     def write_images(self, step: int, images: Mapping[str, Array]):
         """format: (N)CHW
@@ -436,6 +448,10 @@ class LocalWriter(_MetricWriter):
             ax.imshow(np.transpose(value, [1, 2, 0]))
             fig.savefig(path + f"/{key}_{step}.png", bbox_inches="tight", dpi=300)
             plt.close(fig)
+
+    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+      # TODO
+      pass
 
     def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
         """Writes matplotlib figures.
