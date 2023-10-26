@@ -211,7 +211,7 @@ class WandbWriter(_MetricWriter):
   def log_hparams(self, hparams: Mapping[str, Any]):
     self._logger.log_hyperparams(hparams)
 
-  def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
+  def write_scalars(self, step: int, scalars):
     self._logger.log_metrics(scalars, step=step)
 
   def _file_collection_artifact_name(self, step: int=None):
@@ -224,19 +224,19 @@ class WandbWriter(_MetricWriter):
     return f"{project}_{experiment}_{run_id}"
 
   def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int=None):
-    for name, data_entry in data.items():
-      self._write_file(name=name, data=data_entry, step=step)
-
-  def _write_file(self, name: str, data: Union[Array, Dict], step: int=None):
-    write_file_fn, file_ending = _resolve_write_fn(data)
+    """
+    Writes each dictionary item to a file in directory artifact.
+    """
     artifact_name = self._file_collection_artifact_name(step=step)
     file_collection_artifact = wandb.Artifact(name=artifact_name, type=self._artifact_type_name)
-    with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
-      local_filepath = fp.name
-      remote_filepath = f"{name}{file_ending}"
-      write_file_fn(filepath=local_filepath, obj=data)
-      file_collection_artifact.add_file(local_path=local_filepath, name=remote_filepath)
-      wandb.run.log_artifact(file_collection_artifact)
+    for name, data_entry in data.items():
+      write_file_fn, file_ending = _resolve_write_fn(data_entry)
+      with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
+        local_filepath = fp.name
+        remote_filepath = f"{name}{file_ending}"
+        write_file_fn(filepath=local_filepath, obj=data_entry)
+        file_collection_artifact.add_file(local_path=local_filepath, name=remote_filepath)
+    wandb.run.log_artifact(file_collection_artifact) # Write artifact
 
   def download_file_collection(self, step: int=None, target_directory: str="/tmp"):
     project_name = self._project
