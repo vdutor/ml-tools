@@ -33,7 +33,7 @@ import io
 import os
 import importlib
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence, Dict, Union
+from typing import Any, Mapping, Sequence, Union, List
 
 import tempfile
 import jax.numpy as jnp
@@ -50,7 +50,6 @@ try:
     from tensorboardX import SummaryWriter
     from tensorboardX.utils import figure_to_image, make_grid
     import wandb
-    from pytorch_lightning.loggers import WandbLogger
 except ImportError:
     pass
 
@@ -58,7 +57,6 @@ try:
     import aim
 except ImportError:
     pass
-
 
 Scalar = Union[int, float, Array]
 
@@ -126,7 +124,7 @@ class _MetricWriter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
         """Write data for the step. If step is not provided a default namespace is used.
 
         Args:
@@ -169,9 +167,9 @@ class MultiWriter(_MetricWriter):
         for w in self._writers:
             w.write_figures(step, figures)
 
-    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
-      for w in self._writers:
-        w.write_data(data=data, step=step)
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+        for w in self._writers:
+            w.write_data(data=data, step=step)
 
     def flush(self):
         for w in self._writers:
@@ -181,85 +179,121 @@ class MultiWriter(_MetricWriter):
         for w in self._writers:
             w.close()
 
+
 class WandbWriter(_MetricWriter):
-  """MetricWriter that writes to Weights & Biases (Wandb)."""
+    """MetricWriter that writes to Weights & Biases (Wandb)."""
 
-  def __init__(
-    self,
-    project: str,
-    experiment: str,
-    api_key: str=None,
-    artifact_type_name: str="collection"
-  ):
-    """
-    :param project: name of the project
-    :param experiment: name of the experiment
-    :param api_key: Weights & Biases API key
-    """
-    if api_key is not None:
-      wandb.login(key=api_key)
-    logger = WandbLogger(name=experiment, project=project)
-    wandb_run_object = logger.experiment
-    assert wandb_run_object is not None
-    self._wandb_run_object = wandb_run_object
-    self._project = project
-    self._experiment = experiment
-    self._run = wandb_run_object.id
-    self._logger = logger
-    self._artifact_type_name = artifact_type_name
+    def __init__(
+        self,
+        project: str,
+        experiment: str,
+        api_key: str = None,
+        artifact_type_name: str = "collection"
+    ):
+        """
+        :param project: name of the project
+        :param experiment: name of the experiment
+        :param api_key: Weights & Biases API key
+        :param artifact_type_name: name of the (wandb) artifact
+        """
+        should_login = api_key is not None
+        if should_login:
+            wandb.login(key=api_key)
+        wandb_run_object = wandb.init(
+            name=experiment,
+            project=project,
+        )
+        self._wandb_run_object = wandb_run_object
+        self._project = project
+        self._experiment = experiment
+        self._run = wandb_run_object.id
+        self._artifact_type_name = artifact_type_name
 
-  def log_hparams(self, hparams: Mapping[str, Any]):
-    self._logger.log_hyperparams(hparams)
+    def log_hparams(self, hparams: Mapping[str, Any]):
+        self._wandb_run_object.config.update(hparams, allow_val_change=True)
 
-  def write_scalars(self, step: int, scalars):
-    self._logger.log_metrics(scalars, step=step)
+    def write_scalars(self, step: int, scalars: Mapping[str, Scalar]):
+        self._wandb_run_object.log(dict(scalars, **{"step": step}))
 
-  def _file_collection_artifact_name(self, step: int=None):
-    project = self._project
-    experiment = self._experiment
-    run_id = self._run
-    has_step = step is not None
-    if has_step:
-      return f"{project}_{experiment}_{run_id}_{step}"
-    return f"{project}_{experiment}_{run_id}"
+    def write_images(self, step: int, images: Mapping[str, Array]):
+        for image_key, image in images.items():
+            assert len(
+                image.shape) == 3, f"Supports only HWC images but image had shape {image.shape}."
+            key = f"{image_key}_step_{step}"
+            metrics = {key: wandb.Image(image)}
+            self._wandb_run_object.log(metrics)
 
-  def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int=None):
-    """
-    Writes each dictionary item to a file in directory artifact.
-    """
-    artifact_name = self._file_collection_artifact_name(step=step)
-    file_collection_artifact = wandb.Artifact(name=artifact_name, type=self._artifact_type_name)
-    for name, data_entry in data.items():
-      write_file_fn, file_ending = _resolve_write_fn(data_entry)
-      with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
-        local_filepath = fp.name
-        remote_filepath = f"{name}{file_ending}"
-        write_file_fn(filepath=local_filepath, obj=data_entry)
-        file_collection_artifact.add_file(local_path=local_filepath, name=remote_filepath)
-    wandb.run.log_artifact(file_collection_artifact) # Write artifact
+    def _file_collection_artifact_name(self, step: int = None):
+        project = self._project
+        experiment = self._experiment
+        run_id = self._run
+        has_step = step is not None
+        if has_step:
+            return f"{project}_{experiment}_{run_id}_{step}"
+        return f"{project}_{experiment}_{run_id}"
 
-  def download_file_collection(self, step: int=None, target_directory: str="/tmp"):
-    project_name = self._project
-    artifact_name = self._file_collection_artifact_name(step=step)
-    self._logger.download_artifact(
-      # Always v0 since the artifact name holding all data entries should be unique (per step).
-      artifact=f"{project_name}/{artifact_name}:v0",
-      save_dir=target_directory
-    )
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+        """
+        Write data for the step. If step is not provided a default namespace is used.
 
-  def write_images(self, step: int, images: Mapping[str, Array]):
-    for image_key, image in images.items():
-      key = f"{step}_{image_key}"
-      self._logger.log_image(key=key, images=[image])
+        Writes each dictionary item to a file in a directory artifact.
 
-  def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
-    raise NotImplementedError
+        Args:
+          step: Step at which the data was gathered.
+          data: Mapping from metric name to object (serializable dict or array).
+        """
+        artifact_name = self._file_collection_artifact_name(step=step)
+        file_collection_artifact = wandb.Artifact(name=artifact_name, type=self._artifact_type_name)
+        for name, data_entry in data.items():
+            write_file_fn, file_ending = _resolve_write_fn(data_entry)
+            with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
+                local_filepath = fp.name
+                remote_filepath = f"{name}{file_ending}"
+                write_file_fn(filepath=local_filepath, obj=data_entry)
+                file_collection_artifact.add_file(local_path=local_filepath, name=remote_filepath)
+        wandb.run.log_artifact(file_collection_artifact)  # Write artifact
 
-  def flush(self):
-    pass
+    def download_file_collection(
+        self,
+        step: int = None,
+        target_directory: str = "/tmp",
+        version_id: str = None,
+        replace_existing_files: bool = False
+    ) -> List[Path]:
+        """
+        Downloads the contents of the artifact directory to the target directory.
 
-  def close(self):
-    wandb.finish()
+        Args:
+          step: Step at which the data was gathered.
+          target_directory: The directory to write contents as files.
+          version_id: The artifact version id to download (default: latest).
+          replace_existing_files: if to replace existing files.
+
+        Return: List of paths to downloaded files.
+        """
+        project_name = self._project
+        artifact_name = self._file_collection_artifact_name(step=step)
+        if version_id is None:
+            version_id = "latest"  # Gets the latest version id
+        api = wandb.Api()
+        artifact_path = f"{project_name}/{artifact_name}:{version_id}"
+        artifact = api.artifact(artifact_path, type=self._artifact_type_name)
+        downloaded_filepaths = []
+        for file in artifact.files():
+            file.download(root=target_directory, replace=replace_existing_files)
+            filepath = f"{target_directory}/{file.name}"
+            downloaded_filepaths.append(Path(filepath))
+        return downloaded_filepaths
+
+    def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
+        pass
+
+    def flush(self):
+        pass
+
+    def close(self):
+        wandb.finish()
+
 
 class TensorBoardWriter(_MetricWriter):
     """MetricWriter that writes TF summary files."""
@@ -299,9 +333,8 @@ class TensorBoardWriter(_MetricWriter):
             if len(value.shape) == 4:
                 self._summary_writer.add_images(key, value, global_step=step)
 
-    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
-      # TODO
-      pass
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+        pass
 
     def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
         """Writes matplotlib figures.
@@ -343,9 +376,9 @@ class AimWriter(_MetricWriter):
         for key, value in scalars.items():
             self._run.track(value=value, name=key, step=step)
 
-    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
-      # TODO
-      pass
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+        # TODO
+        pass
 
     def write_images(self, step: int, images: Mapping[str, Array]):
         """format: (N)CHW
@@ -440,14 +473,14 @@ class LocalWriter(_MetricWriter):
             fig.savefig(path + f"/{key}_{step}.png", bbox_inches="tight", dpi=300)
             plt.close(fig)
 
-    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
-      has_step = step is not None
-      for name, data_entry in data.items():
-        write_file_fn, file_ending = _resolve_write_fn(data=data_entry)
-        if has_step:
-          name = f"{name}_{step}"
-        filepath = f"{self._logdir}/{name}{file_ending}"
-        write_file_fn(filepath=filepath, obj=data_entry)
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+        has_step = step is not None
+        for name, data_entry in data.items():
+            write_file_fn, file_ending = _resolve_write_fn(data=data_entry)
+            if has_step:
+                name = f"{name}_{step}"
+            filepath = f"{self._logdir}/{name}{file_ending}"
+            write_file_fn(filepath=filepath, obj=data_entry)
 
     def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
         """Writes matplotlib figures.
@@ -481,19 +514,28 @@ class LocalWriter(_MetricWriter):
     def close(self):
         self.flush()
 
+
 def _resolve_write_fn(data):
-  def _write_numpy_file(filepath, obj):
-    obj = np.array(obj)
+    file_ending_npy = ".npy"
+    file_ending_json = ".json"
+    if _is_numpy_like(data):
+        return _write_numpy_file, file_ending_npy
+    if not isinstance(data, dict):
+        raise ValueError(f"Unhandled data type: {type(data)}")
+    has_only_numpy_like_values = all(map(_is_numpy_like, data.values()))
+    if has_only_numpy_like_values:
+        return _write_numpy_file, file_ending_npy
+    return _write_json_file, file_ending_json
+
+
+def _is_numpy_like(obj):
+    return hasattr(obj, "shape")
+
+
+def _write_numpy_file(filepath, obj):
     np.save(filepath, arr=obj)
-  def _write_json_file(filepath, obj):
+
+
+def _write_json_file(filepath, obj):
     with open(filepath, "w") as f:
-      f.write(json.dumps(obj))
-  if isinstance(data, dict):
-    write_file_fn = _write_json_file
-    file_ending = ".json"
-  elif hasattr(data, "shape"):
-    write_file_fn = _write_numpy_file
-    file_ending = ".npy"
-  else:
-    raise ValueError(f"Unhandled data type: {type(data)}")
-  return write_file_fn, file_ending
+        f.write(json.dumps(obj))
