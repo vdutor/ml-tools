@@ -33,7 +33,7 @@ import io
 import os
 import importlib
 from pathlib import Path
-from typing import Any, Mapping, Sequence, Union, List
+from typing import Any, Mapping, Sequence, Union, List, Optional
 
 import tempfile
 import jax.numpy as jnp
@@ -124,7 +124,7 @@ class _MetricWriter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: Optional[int] = None):
         """Write data for the step. If step is not provided a default namespace is used.
 
         Args:
@@ -167,7 +167,7 @@ class MultiWriter(_MetricWriter):
         for w in self._writers:
             w.write_figures(step, figures)
 
-    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: Optional[int] = None):
         for w in self._writers:
             w.write_data(data=data, step=step)
 
@@ -232,7 +232,7 @@ class WandbWriter(_MetricWriter):
             return f"{project}_{experiment}_{run_id}_{step}"
         return f"{project}_{experiment}_{run_id}"
 
-    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: Optional[int] = None):
         """
         Write data for the step. If step is not provided a default namespace is used.
 
@@ -255,7 +255,7 @@ class WandbWriter(_MetricWriter):
 
     def download_file_collection(
         self,
-        step: int = None,
+        step: Optional[int] = None,
         target_directory: str = "/tmp",
         version_id: str = None,
         replace_existing_files: bool = False
@@ -333,7 +333,7 @@ class TensorBoardWriter(_MetricWriter):
             if len(value.shape) == 4:
                 self._summary_writer.add_images(key, value, global_step=step)
 
-    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: Optional[int] = None):
         pass
 
     def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
@@ -376,7 +376,7 @@ class AimWriter(_MetricWriter):
         for key, value in scalars.items():
             self._run.track(value=value, name=key, step=step)
 
-    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: Optional[int] = None):
         # TODO
         pass
 
@@ -473,7 +473,7 @@ class LocalWriter(_MetricWriter):
             fig.savefig(path + f"/{key}_{step}.png", bbox_inches="tight", dpi=300)
             plt.close(fig)
 
-    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: Optional[int] = None):
         has_step = step is not None
         for name, data_entry in data.items():
             write_file_fn, file_ending = _resolve_write_fn(data=data_entry)
