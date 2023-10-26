@@ -253,7 +253,7 @@ class WandbWriter(_MetricWriter):
       self._logger.log_image(key=key, images=[image])
 
   def write_figures(self, step: int, figures: Mapping[str, plt.Figure]):
-    raise NotImplementedError
+    pass
 
   def flush(self):
     pass
