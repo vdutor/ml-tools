@@ -169,7 +169,7 @@ class MultiWriter(_MetricWriter):
         for w in self._writers:
             w.write_figures(step, figures)
 
-    def write_data(self, data: Mapping[str, Union[Array, Dict]], step: int = None):
+    def write_data(self, data: Mapping[str, Union[Array, Mapping]], step: int = None):
       for w in self._writers:
         w.write_data(data=data, step=step)
 
