@@ -184,7 +184,13 @@ class MultiWriter(_MetricWriter):
 class WandbWriter(_MetricWriter):
   """MetricWriter that writes to Weights & Biases (Wandb)."""
 
-  def __init__(self, project: str, experiment: str, api_key: str=None):
+  def __init__(
+    self,
+    project: str,
+    experiment: str,
+    api_key: str=None,
+    artifact_type_name: str="collection"
+  ):
     """
     :param project: name of the project
     :param experiment: name of the experiment
@@ -200,6 +206,7 @@ class WandbWriter(_MetricWriter):
     self._experiment = experiment
     self._run = wandb_run_object.id
     self._logger = logger
+    self._artifact_type_name = artifact_type_name
 
   def log_hparams(self, hparams: Mapping[str, Any]):
     self._logger.log_hyperparams(hparams)
@@ -223,7 +230,7 @@ class WandbWriter(_MetricWriter):
   def _write_file(self, name: str, data: Union[Array, Dict], step: int=None):
     write_file_fn, file_ending = _resolve_write_fn(data)
     artifact_name = self._file_collection_artifact_name(step=step)
-    file_collection_artifact = wandb.Artifact(name=artifact_name, type="general")
+    file_collection_artifact = wandb.Artifact(name=artifact_name, type=self._artifact_type_name)
     with tempfile.NamedTemporaryFile(suffix=file_ending) as fp:
       local_filepath = fp.name
       remote_filepath = f"{name}{file_ending}"
